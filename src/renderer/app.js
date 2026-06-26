@@ -141,7 +141,7 @@ function videoControlsVisible() {
   );
 }
 
-function showVideoControls(mode = "full", timeout = 3000, options = {}) {
+function showVideoControls(mode = "full", timeout = 2000, options = {}) {
   if (state.mediaType !== "video") return;
   clearTimeout(state.videoControlsTimer);
   const locked = state.videoControlsLockedMode;
@@ -167,7 +167,7 @@ function showVideoInputFeedback(mode, timeout = 1400) {
   if (state.videoControlsLockedMode) {
     showVideoControls(state.videoControlsLockedMode, timeout, { lockMode: true });
   } else if (videoControlsVisible() && state.videoControlsMode === "full") {
-    showVideoControls("full", 3000);
+    showVideoControls("full", 2000);
   } else {
     showVideoControls(mode, timeout, { lockMode: true });
   }
@@ -366,7 +366,7 @@ function setVideoPlaybackMode(mode) {
   state.videoPlaybackMode = mode;
   localStorage.setItem("videoPlaybackMode", mode);
   updateVideoUi();
-  showVideoControls("full", 3000);
+  showVideoControls("full", 2000);
 }
 
 function cycleVideoPlaybackMode() {
@@ -402,7 +402,7 @@ async function playVideoIndex(index) {
   await selectItem(index);
   if (state.mediaType === "video") {
     void video.play().catch(() => {});
-    showVideoControls("full", 3000);
+    showVideoControls("full", 2000);
   }
 }
 
@@ -700,7 +700,7 @@ async function loadCurrentVideo(item) {
     imageLayer.classList.add("video-active");
     fitImage();
     updateVideoUi();
-    showVideoControls("full", 3000);
+    showVideoControls("full", 2000);
     updateUi();
     preloadAdjacentImages();
   } catch (error) {
@@ -1066,13 +1066,13 @@ function bindActions() {
   videoSpeedSelect.onchange = (event) => {
     video.playbackRate = Number(event.target.value) || 1;
     updateVideoUi();
-    showVideoControls("full", 3000);
+    showVideoControls("full", 2000);
   };
   videoModeBtn.onclick = cycleVideoPlaybackMode;
   videoSubtitleBtn.onclick = () => {
     if (!video.textTracks.length) return;
     setSubtitleTrackMode(!subtitleTrackShowing());
-    showVideoControls("full", 3000);
+    showVideoControls("full", 2000);
   };
   videoFullscreenBtn.onclick = toggleFullscreen;
   video.onclick = (event) => {
@@ -1162,7 +1162,7 @@ function bindActions() {
   $("restartUpdateBtn").onclick = () => window.clipView.restartAndUpdate();
   videoControls.addEventListener("mousedown", (event) => event.stopPropagation());
   videoControls.addEventListener("dblclick", (event) => event.stopPropagation());
-  videoControls.addEventListener("mousemove", () => showVideoControls("full", 3000));
+  videoControls.addEventListener("mousemove", () => showVideoControls("full", 2000));
   videoContextMenu.querySelectorAll("[data-video-mode]").forEach((button) => {
     button.addEventListener("click", () => {
       setVideoPlaybackMode(button.dataset.videoMode);
@@ -1174,7 +1174,7 @@ function bindActions() {
       video.playbackRate = Number(button.dataset.videoSpeed) || 1;
       updateVideoUi();
       hideVideoContextMenu();
-      showVideoControls("full", 3000, { forceFull: true });
+      showVideoControls("full", 2000, { forceFull: true });
     });
   });
   videoContextMenu.querySelectorAll("[data-video-action]").forEach((button) => {
@@ -1197,7 +1197,7 @@ stage.addEventListener("wheel", (event) => {
 }, { passive: false });
 
 stage.addEventListener("mousemove", () => {
-  if (state.mediaType === "video") showVideoControls("full", 3000);
+  if (state.mediaType === "video") showVideoControls("full", 2000);
 });
 
 stage.addEventListener("contextmenu", (event) => {
