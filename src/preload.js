@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld("clipView", {
   openPath: (targetPath) => ipcRenderer.invoke("open-path", targetPath),
   loadImage: (item, cropMode) => ipcRenderer.invoke("load-image", item, cropMode),
   loadThumbnail: (item) => ipcRenderer.invoke("load-thumbnail", item),
+  mediaFileUrl: (item) => ipcRenderer.invoke("media-file-url", item),
+  findSubtitles: (item) => ipcRenderer.invoke("find-subtitles", item),
   copyImage: (dataUrl) => ipcRenderer.invoke("copy-image", dataUrl),
   saveImageCopy: (dataUrl, name) => ipcRenderer.invoke("save-image-copy", dataUrl, name),
   showInFolder: (item) => ipcRenderer.invoke("show-in-folder", item),

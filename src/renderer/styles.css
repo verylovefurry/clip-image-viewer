@@ -217,18 +217,26 @@ button.active {
   cursor: grabbing;
 }
 
-#viewerImage {
+#viewerImage,
+#viewerVideo {
   position: absolute;
   top: 50%;
   left: 50%;
   display: block;
   max-width: none;
   max-height: none;
-  pointer-events: none;
   transform-origin: 0 0;
-  image-rendering: auto;
   will-change: transform;
   box-shadow: 0 10px 45px rgba(0, 0, 0, 0.28);
+}
+
+#viewerImage {
+  pointer-events: none;
+  image-rendering: auto;
+}
+
+#viewerVideo {
+  background: #000;
 }
 
 .loading {
@@ -583,6 +591,13 @@ dialog::backdrop {
   border-radius: 8px;
   overflow-y: auto;
   font-size: 13px;
+}
+
+.association-divider {
+  height: 1px;
+  margin: 4px 0 14px;
+  border: 0;
+  background: var(--line);
 }
 
 .association-options label {

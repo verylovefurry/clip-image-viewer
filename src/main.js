@@ -14,20 +14,30 @@ const {
 const fs = require("fs");
 const path = require("path");
 const { execFileSync, spawn } = require("child_process");
+const { pathToFileURL } = require("url");
 const {
   ARCHIVE_EXTENSIONS,
   BASIC_ASSOCIATION_EXTENSIONS,
   OPTIONAL_ASSOCIATION_EXTENSIONS,
+  OPTIONAL_IMAGE_ASSOCIATION_EXTENSIONS,
+  OPTIONAL_VIDEO_ASSOCIATION_EXTENSIONS,
   PROJECT_EXTENSIONS,
   SUPPORTED_EXTENSIONS,
   extensionOf,
   findComicProject,
   isSupported,
   listFolder,
+  mediaTypeForPath,
+  naturalCompare,
 } = require("./file-types");
 const { constrainBounds, createDefaultBounds } = require("./window-state");
 
 const ALL_EXTENSIONS = [...SUPPORTED_EXTENSIONS].sort();
+const OPTIONAL_ASSOCIATION_COUNT = (
+  OPTIONAL_IMAGE_ASSOCIATION_EXTENSIONS.length +
+  OPTIONAL_VIDEO_ASSOCIATION_EXTENSIONS.length
+);
+const SUBTITLE_EXTENSIONS = new Set([".vtt", ".srt", ".ass", ".ssa"]);
 const PRODUCT_NAME = "Clip Image Viewer";
 const PROG_ID_PREFIX = "ClipImageViewer";
 const CAPABILITIES_KEY = "HKCU\\Software\\ClipImageViewer\\Capabilities";
@@ -251,7 +261,7 @@ function createWindow() {
             }))()`);
             if (settings.count) break;
           }
-          if (!settings?.open || settings.count !== OPTIONAL_ASSOCIATION_EXTENSIONS.length) {
+          if (!settings?.open || settings.count !== OPTIONAL_ASSOCIATION_COUNT) {
             throw new Error(`Association settings failed: ${JSON.stringify(settings)}`);
           }
           const associationControlsExpectedHidden = !fileAssociationSupported();
@@ -396,7 +406,135 @@ function itemForPath(filePath) {
     kind: ARCHIVE_EXTENSIONS.has(extensionOf(filePath)) ? "archive" : "file",
     path: filePath,
     name: path.basename(filePath),
+    mediaType: mediaTypeForPath(filePath),
   };
+}
+
+function subtitleTimestamp(value) {
+  const match = String(value).trim().match(/^(\d+):(\d{1,2}):(\d{1,2})([,.](\d{1,3}))?$/);
+  if (!match) return null;
+  const [, hours, minutes, seconds, , fraction = "0"] = match;
+  return [
+    String(Number(hours)).padStart(2, "0"),
+    String(Number(minutes)).padStart(2, "0"),
+    String(Number(seconds)).padStart(2, "0"),
+  ].join(":") + `.${fraction.padEnd(3, "0").slice(0, 3)}`;
+}
+
+function srtToVtt(content) {
+  return `WEBVTT\n\n${String(content)
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/(\d{1,2}:\d{2}:\d{2}),(\d{1,3})/g, "$1.$2")
+    .replace(/^\d+\n(?=\d{1,2}:\d{2}:\d{2}\.\d{1,3}\s+-->\s+)/gm, "")}`;
+}
+
+function splitAssDialogue(line, fieldCount) {
+  const values = [];
+  let rest = line;
+  for (let index = 1; index < fieldCount; index += 1) {
+    const comma = rest.indexOf(",");
+    if (comma < 0) break;
+    values.push(rest.slice(0, comma));
+    rest = rest.slice(comma + 1);
+  }
+  values.push(rest);
+  return values;
+}
+
+function assToVtt(content) {
+  const lines = String(content).replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
+  let inEvents = false;
+  let format = [];
+  const cues = [];
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith(";")) continue;
+    if (/^\[events\]$/i.test(line)) {
+      inEvents = true;
+      continue;
+    }
+    if (line.startsWith("[") && !/^\[events\]$/i.test(line)) {
+      inEvents = false;
+      continue;
+    }
+    if (!inEvents) continue;
+    if (/^format:/i.test(line)) {
+      format = line.slice(line.indexOf(":") + 1).split(",").map((value) => value.trim().toLowerCase());
+      continue;
+    }
+    if (!/^dialogue:/i.test(line) || !format.length) continue;
+    const values = splitAssDialogue(line.slice(line.indexOf(":") + 1).trim(), format.length);
+    const start = subtitleTimestamp(values[format.indexOf("start")]);
+    const end = subtitleTimestamp(values[format.indexOf("end")]);
+    const textIndex = format.indexOf("text");
+    if (!start || !end || textIndex < 0) continue;
+    const text = values[textIndex]
+      .replace(/\{[^}]*\}/g, "")
+      .replace(/\\[Nn]/g, "\n")
+      .replace(/\\h/g, " ")
+      .trim();
+    if (text) cues.push(`${start} --> ${end}\n${text}`);
+  }
+  return `WEBVTT\n\n${cues.join("\n\n")}`;
+}
+
+function subtitleLabel(videoBase, subtitlePath) {
+  const parsed = path.parse(subtitlePath);
+  const suffix = parsed.name === videoBase
+    ? ""
+    : parsed.name.slice(videoBase.length).replace(/^\./, "");
+  return suffix ? suffix.toUpperCase() : "자막";
+}
+
+function subtitleLanguage(label) {
+  const normalized = label.toLowerCase();
+  if (["ko", "kor", "kr", "korean", "한국어"].includes(normalized)) return "ko";
+  if (["ja", "jpn", "jp", "japanese", "日本語"].includes(normalized)) return "ja";
+  if (["en", "eng", "english"].includes(normalized)) return "en";
+  return "und";
+}
+
+function readSubtitleText(subtitlePath) {
+  const buffer = fs.readFileSync(subtitlePath);
+  if (buffer[0] === 0xFF && buffer[1] === 0xFE) {
+    return new TextDecoder("utf-16le").decode(buffer);
+  }
+  if (buffer[0] === 0xFE && buffer[1] === 0xFF) {
+    return new TextDecoder("utf-16be").decode(buffer);
+  }
+  const utf8 = new TextDecoder("utf-8").decode(buffer);
+  if (!utf8.includes("\uFFFD")) return utf8;
+  try {
+    return new TextDecoder("euc-kr").decode(buffer);
+  } catch {
+    return utf8;
+  }
+}
+
+function subtitleToVtt(subtitlePath) {
+  const ext = extensionOf(subtitlePath);
+  const content = readSubtitleText(subtitlePath);
+  if (ext === ".srt") return srtToVtt(content);
+  if (ext === ".ass" || ext === ".ssa") return assToVtt(content);
+  return content.replace(/^\uFEFF/, "").startsWith("WEBVTT")
+    ? content
+    : `WEBVTT\n\n${content}`;
+}
+
+function findSubtitleFiles(videoPath) {
+  const folderPath = path.dirname(videoPath);
+  const videoBase = path.basename(videoPath, path.extname(videoPath));
+  return fs.readdirSync(folderPath, { withFileTypes: true })
+    .filter((entry) => {
+      if (!entry.isFile()) return false;
+      const ext = extensionOf(entry.name);
+      if (!SUBTITLE_EXTENSIONS.has(ext)) return false;
+      const subtitleBase = path.basename(entry.name, ext);
+      return subtitleBase === videoBase || subtitleBase.startsWith(`${videoBase}.`);
+    })
+    .map((entry) => path.join(folderPath, entry.name))
+    .sort((a, b) => naturalCompare(path.basename(a), path.basename(b)));
 }
 
 function getImageLoader() {
@@ -509,7 +647,7 @@ function registerExtension(ext) {
     `HKCU\\Software\\Classes\\${progId}`,
     "/ve",
     "/d",
-    `${PRODUCT_NAME} 이미지`,
+    `${PRODUCT_NAME} 미디어`,
     "/f",
   ]);
   runReg([
@@ -556,7 +694,7 @@ function registerApplicationCapabilities(extensions) {
     "/v",
     "ApplicationDescription",
     "/d",
-    "다양한 이미지와 CLIP STUDIO PAINT 문서를 보는 이미지 뷰어",
+    "다양한 이미지, 동영상, CLIP STUDIO PAINT 문서를 보는 미디어 뷰어",
     "/f",
   ]);
   runReg([
@@ -918,7 +1056,7 @@ ipcMain.handle("open-dialog", async (_event, kind) => {
     : {
         properties: ["openFile"],
         filters: [{
-          name: "지원 이미지",
+          name: "지원 미디어",
           extensions: [...SUPPORTED_EXTENSIONS].map((ext) => ext.slice(1)),
         }, { name: "모든 파일", extensions: ["*"] }],
       });
@@ -930,6 +1068,41 @@ ipcMain.handle("load-image", async (_event, item, cropMode) => (
   getImageLoader().loadImage(item, cropMode)
 ));
 ipcMain.handle("load-thumbnail", async (_event, item) => getImageLoader().loadThumbnail(item));
+
+ipcMain.handle("media-file-url", async (_event, item) => {
+  if (!item || item.kind !== "file" || !item.path) {
+    throw new Error("동영상 파일을 열 수 없습니다.");
+  }
+  if (mediaTypeForPath(item.path) !== "video") {
+    throw new Error("동영상 파일이 아닙니다.");
+  }
+  const stat = fs.statSync(item.path);
+  return {
+    url: pathToFileURL(item.path).toString(),
+    metadata: {
+      format: extensionOf(item.path).slice(1).toUpperCase(),
+      byteSize: stat.size,
+      modifiedAt: stat.mtimeMs,
+      source: "동영상 파일",
+    },
+  };
+});
+
+ipcMain.handle("find-subtitles", async (_event, item) => {
+  if (!item || item.kind !== "file" || !item.path || mediaTypeForPath(item.path) !== "video") {
+    return [];
+  }
+  const videoBase = path.basename(item.path, path.extname(item.path));
+  return findSubtitleFiles(item.path).map((subtitlePath) => {
+    const label = subtitleLabel(videoBase, subtitlePath);
+    return {
+      name: path.basename(subtitlePath),
+      label,
+      srclang: subtitleLanguage(label),
+      vtt: subtitleToVtt(subtitlePath),
+    };
+  });
+});
 
 ipcMain.handle("copy-image", async (_event, dataUrl) => {
   const image = nativeImage.createFromDataURL(dataUrl);
@@ -973,6 +1146,8 @@ ipcMain.handle("get-runtime-info", () => ({
   isPortable: isPortableBuild(),
   associationSupported: fileAssociationSupported(),
   basicAssociations: [...BASIC_ASSOCIATION_EXTENSIONS].sort(),
+  optionalImageAssociations: OPTIONAL_IMAGE_ASSOCIATION_EXTENSIONS,
+  optionalVideoAssociations: OPTIONAL_VIDEO_ASSOCIATION_EXTENSIONS,
   optionalAssociations: OPTIONAL_ASSOCIATION_EXTENSIONS,
   updateSupported: updateSupported(),
   updateState,

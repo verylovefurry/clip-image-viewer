@@ -119,9 +119,12 @@ async function run() {
 
   fs.writeFileSync(path.join(temp, "image10.png"), extracted);
   fs.writeFileSync(path.join(temp, "image2.png"), extracted);
+  fs.writeFileSync(path.join(temp, "sample.mp4"), "not a real video");
   fs.writeFileSync(path.join(temp, "ignore.txt"), "x");
-  const files = listFolder(temp).map((item) => item.name);
-  assert.deepEqual(files, ["image2.png", "image10.png", "sample.clip"]);
+  const folderItems = listFolder(temp);
+  const files = folderItems.map((item) => item.name);
+  assert.deepEqual(files, ["image2.png", "image10.png", "sample.clip", "sample.mp4"]);
+  assert.equal(folderItems.find((item) => item.name === "sample.mp4").mediaType, "video");
   assert(naturalCompare("2.png", "10.png") < 0);
 
   const page1 = path.join(temp, "page1.clip");
@@ -162,6 +165,7 @@ async function run() {
     ".bpg", ".dng", ".cr2", ".crw", ".nef", ".nrw", ".orf", ".rw2",
     ".pef", ".sr2", ".raf", ".avif", ".jxl", ".exr", ".qoi", ".ico",
     ".svg", ".heic", ".heif", ".hif", ".clip",
+    ".mp4", ".mkv", ".webm", ".avi", ".mov", ".wmv", ".m2ts", ".ogv",
   ];
   requiredExtensions.forEach((ext) => assert(SUPPORTED_EXTENSIONS.has(ext), ext));
 

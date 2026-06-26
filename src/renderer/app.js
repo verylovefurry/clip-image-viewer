@@ -3,7 +3,10 @@
 const state = {
   items: [],
   index: -1,
+  mediaType: "",
   imageDataUrl: "",
+  videoSrc: "",
+  subtitleObjectUrls: [],
   naturalWidth: 0,
   naturalHeight: 0,
   metadata: null,
@@ -38,6 +41,7 @@ const $ = (id) => document.getElementById(id);
 const stage = $("stage");
 const imageLayer = $("imageLayer");
 const image = $("viewerImage");
+const video = $("viewerVideo");
 const emptyState = $("emptyState");
 const loading = $("loading");
 const toast = $("toast");
@@ -47,6 +51,36 @@ const imageCache = new Map();
 
 function currentItem() {
   return state.items[state.index] || null;
+}
+
+function isVideoItem(item = currentItem()) {
+  return item?.mediaType === "video";
+}
+
+function hasMedia() {
+  return Boolean(state.imageDataUrl || state.videoSrc);
+}
+
+function clearSubtitleTracks() {
+  state.subtitleObjectUrls.forEach((url) => URL.revokeObjectURL(url));
+  state.subtitleObjectUrls = [];
+  video.querySelectorAll("track").forEach((track) => track.remove());
+}
+
+function clearVideo() {
+  clearSubtitleTracks();
+  video.pause();
+  video.onloadedmetadata = null;
+  video.onerror = null;
+  video.removeAttribute("src");
+  video.load();
+  state.videoSrc = "";
+}
+
+function clearImage() {
+  image.removeAttribute("src");
+  image.classList.add("hidden");
+  state.imageDataUrl = "";
 }
 
 function imageKey(index, cropMode = state.cropMode) {
@@ -90,6 +124,7 @@ function loadImageCached(index) {
   const key = imageKey(index);
   if (imageCache.has(key)) return imageCache.get(key);
   const item = state.items[index];
+  if (isVideoItem(item)) return Promise.reject(new Error("이미지 파일이 아닙니다."));
   const promise = window.clipView.loadImage(item, state.cropMode)
     .then(async (result) => {
       await decodeImage(result.dataUrl);
@@ -115,8 +150,38 @@ function pruneImageCache() {
 function preloadAdjacentImages() {
   pruneImageCache();
   for (const index of adjacentIndices()) {
+    if (isVideoItem(state.items[index])) continue;
     void loadImageCached(index).catch(() => {});
   }
+}
+
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "-";
+  const total = Math.round(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  return hours
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
+    : `${minutes}:${String(secs).padStart(2, "0")}`;
+}
+
+function attachSubtitleTracks(subtitles) {
+  clearSubtitleTracks();
+  subtitles.forEach((subtitle, index) => {
+    const url = URL.createObjectURL(new Blob([subtitle.vtt], { type: "text/vtt" }));
+    state.subtitleObjectUrls.push(url);
+    const track = document.createElement("track");
+    track.kind = "subtitles";
+    track.label = subtitle.label || subtitle.name || "자막";
+    track.srclang = subtitle.srclang || "und";
+    track.src = url;
+    track.default = index === 0;
+    video.appendChild(track);
+    track.addEventListener("load", () => {
+      track.track.mode = index === 0 ? "showing" : "disabled";
+    });
+  });
 }
 
 function formatBytes(bytes) {
@@ -135,12 +200,14 @@ function showToast(message, isError = false) {
 }
 
 function applyTransform() {
-  image.style.transform = [
+  const transform = [
     `translate(${state.panX}px, ${state.panY}px)`,
     `rotate(${state.rotation}deg)`,
     `scale(${state.zoom * state.flipX}, ${state.zoom})`,
     "translate(-50%, -50%)",
   ].join(" ");
+  image.style.transform = state.mediaType === "image" ? transform : "";
+  video.style.transform = state.mediaType === "video" ? transform : "";
   $("zoomLabel").textContent = `${Math.round(state.zoom * 100)}%`;
 }
 
@@ -173,14 +240,14 @@ function actualSize() {
 }
 
 function zoomBy(factor) {
-  if (!state.imageDataUrl) return;
+  if (!hasMedia()) return;
   state.fitMode = false;
   state.zoom = Math.min(32, Math.max(0.02, state.zoom * factor));
   applyTransform();
 }
 
 function rotate(amount) {
-  if (!state.imageDataUrl) return;
+  if (!hasMedia()) return;
   state.rotation = (state.rotation + amount + 360) % 360;
   if (state.fitMode) fitImage();
   else applyTransform();
@@ -189,7 +256,17 @@ function rotate(amount) {
 function updateInfoPanel() {
   const item = currentItem();
   const meta = state.metadata || {};
-  const values = [
+  const values = state.mediaType === "video" ? [
+    ["파일", item?.name || "-"],
+    ["경로", item?.displayPath || item?.path || "-"],
+    ["크기", `${meta.width || 0} × ${meta.height || 0}`],
+    ["형식", meta.format || "-"],
+    ["파일 용량", formatBytes(meta.byteSize)],
+    ["재생 시간", formatDuration(meta.duration)],
+    ["자막", meta.subtitleCount ? `${meta.subtitleCount}개` : "없음"],
+    ["불러오기", meta.source || "-"],
+    ["수정 시각", meta.modifiedAt ? new Date(meta.modifiedAt).toLocaleString() : "-"],
+  ] : [
     ["파일", item?.name || "-"],
     ["경로", item?.displayPath || item?.path || "-"],
     ["크기", `${meta.width || 0} × ${meta.height || 0}`],
@@ -219,7 +296,7 @@ function escapeHtml(value) {
 
 function updateUi() {
   const item = currentItem();
-  $("fileTitle").textContent = item?.name || "이미지를 열어주세요";
+  $("fileTitle").textContent = item?.name || "미디어를 열어주세요";
   document.title = item ? `${item.name} - Clip Image Viewer` : "Clip Image Viewer";
   $("counter").textContent = state.items.length ? `${state.index + 1} / ${state.items.length}` : "0 / 0";
   $("dimensionLabel").textContent = state.metadata?.width
@@ -227,7 +304,7 @@ function updateUi() {
     : "-";
   $("prevOverlay").classList.toggle("hidden", state.items.length < 2);
   $("nextOverlay").classList.toggle("hidden", state.items.length < 2);
-  const showCropModes = Boolean(state.comic?.cropAvailable);
+  const showCropModes = !isVideoItem(item) && Boolean(state.comic?.cropAvailable);
   $("cropModeSelect").classList.toggle("hidden", !showCropModes);
   $("cropModeSelect").value = state.cropMode;
   updateInfoPanel();
@@ -242,10 +319,21 @@ function updateUi() {
 async function loadCurrent() {
   const item = currentItem();
   if (!item) return;
+  if (isVideoItem(item)) {
+    await loadCurrentVideo(item);
+    return;
+  }
+  await loadCurrentImage(item);
+}
+
+async function loadCurrentImage(item) {
   const sequence = ++loadSequence;
   const cached = imageCache.has(imageKey(state.index));
   loading.classList.toggle("hidden", cached);
   emptyState.classList.add("hidden");
+  clearVideo();
+  video.classList.add("hidden");
+  state.mediaType = "image";
   if (!state.imageDataUrl) imageLayer.classList.add("hidden");
 
   try {
@@ -268,14 +356,75 @@ async function loadCurrent() {
     state.naturalWidth = image.naturalWidth;
     state.naturalHeight = image.naturalHeight;
     image.alt = item.name;
+    image.classList.remove("hidden");
     imageLayer.classList.remove("hidden");
     fitImage();
     updateUi();
     preloadAdjacentImages();
   } catch (error) {
     state.imageDataUrl = "";
+    state.mediaType = "";
+    imageLayer.classList.add("hidden");
     emptyState.classList.remove("hidden");
     showToast(error?.message || "이미지를 열지 못했습니다.", true);
+  } finally {
+    loading.classList.add("hidden");
+  }
+}
+
+async function loadCurrentVideo(item) {
+  const sequence = ++loadSequence;
+  loading.classList.remove("hidden");
+  emptyState.classList.add("hidden");
+  clearImage();
+  clearVideo();
+  state.mediaType = "video";
+  imageLayer.classList.add("hidden");
+
+  try {
+    const [media, subtitles] = await Promise.all([
+      window.clipView.mediaFileUrl(item),
+      window.clipView.findSubtitles(item).catch(() => []),
+    ]);
+    if (sequence !== loadSequence) return;
+
+    state.rotation = 0;
+    state.flipX = 1;
+    state.panX = 0;
+    state.panY = 0;
+    state.fitMode = true;
+
+    await new Promise((resolve, reject) => {
+      video.onloadedmetadata = resolve;
+      video.onerror = () => reject(new Error("동영상 코덱을 재생할 수 없습니다."));
+      video.src = media.url;
+      video.load();
+    });
+    if (sequence !== loadSequence) return;
+
+    state.videoSrc = media.url;
+    state.naturalWidth = video.videoWidth || 16;
+    state.naturalHeight = video.videoHeight || 9;
+    state.metadata = {
+      ...media.metadata,
+      width: state.naturalWidth,
+      height: state.naturalHeight,
+      duration: video.duration,
+      subtitleCount: subtitles.length,
+    };
+    attachSubtitleTracks(subtitles);
+    video.classList.remove("hidden");
+    imageLayer.classList.remove("hidden");
+    fitImage();
+    updateUi();
+    preloadAdjacentImages();
+  } catch (error) {
+    state.videoSrc = "";
+    state.mediaType = "";
+    state.metadata = null;
+    imageLayer.classList.add("hidden");
+    emptyState.classList.remove("hidden");
+    showToast(error?.message || "동영상을 열지 못했습니다.", true);
   } finally {
     loading.classList.add("hidden");
   }
@@ -287,7 +436,7 @@ async function openPath(targetPath) {
   try {
     const collection = await window.clipView.openPath(targetPath);
     if (!collection.items.length) {
-      showToast("지원되는 이미지가 없습니다.", true);
+      showToast("지원되는 파일이 없습니다.", true);
       return;
     }
     state.items = collection.items;
@@ -338,6 +487,20 @@ function toggleThumbnails(force) {
   setTimeout(() => state.fitMode && fitImage(), 0);
 }
 
+function videoPlaceholderDataUrl(item) {
+  const label = escapeHtml((item.name || "VIDEO").replace(/^(.{22}).+$/, "$1..."));
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="300" height="152" viewBox="0 0 300 152">
+      <rect width="300" height="152" rx="12" fill="#151923"/>
+      <path d="M130 49v54l48-27z" fill="#73a6ff"/>
+      <text x="150" y="128" fill="#cbd2dd" font-family="Segoe UI, sans-serif"
+            font-size="18" text-anchor="middle">VIDEO</text>
+      <text x="150" y="145" fill="#7f8998" font-family="Segoe UI, sans-serif"
+            font-size="11" text-anchor="middle">${label}</text>
+    </svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 async function renderThumbnails() {
   const strip = $("thumbnailStrip");
   strip.innerHTML = "";
@@ -361,7 +524,10 @@ async function renderThumbnails() {
     while (queue.length) {
       const { element, index } = queue.shift();
       try {
-        element.querySelector("img").src = await window.clipView.loadThumbnail(state.items[index]);
+        const item = state.items[index];
+        element.querySelector("img").src = isVideoItem(item)
+          ? videoPlaceholderDataUrl(item)
+          : await window.clipView.loadThumbnail(item);
       } catch {
         element.querySelector("span").textContent = `미리보기 없음 · ${state.items[index].name}`;
       }
@@ -411,6 +577,60 @@ function transformedPngDataUrl() {
   return canvas.toDataURL("image/png");
 }
 
+function toggleVideoPlayback() {
+  if (state.mediaType !== "video") return;
+  if (video.paused) void video.play();
+  else video.pause();
+}
+
+function seekVideoBy(seconds) {
+  if (state.mediaType !== "video" || !Number.isFinite(video.duration)) return;
+  video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seconds));
+}
+
+function changeVideoVolume(delta) {
+  if (state.mediaType !== "video") return;
+  video.muted = false;
+  video.volume = Math.max(0, Math.min(1, video.volume + delta));
+}
+
+function handleVideoShortcut(event, key) {
+  if (state.mediaType !== "video" || !event.ctrlKey || event.altKey || event.shiftKey) {
+    return false;
+  }
+  if (key === " ") {
+    event.preventDefault();
+    toggleVideoPlayback();
+    return true;
+  }
+  if (key === "arrowleft") {
+    event.preventDefault();
+    seekVideoBy(-5);
+    return true;
+  }
+  if (key === "arrowright") {
+    event.preventDefault();
+    seekVideoBy(5);
+    return true;
+  }
+  if (key === "arrowup") {
+    event.preventDefault();
+    changeVideoVolume(0.1);
+    return true;
+  }
+  if (key === "arrowdown") {
+    event.preventDefault();
+    changeVideoVolume(-0.1);
+    return true;
+  }
+  if (key === "m") {
+    event.preventDefault();
+    video.muted = !video.muted;
+    return true;
+  }
+  return false;
+}
+
 function selectedOptionalAssociations() {
   return [...document.querySelectorAll(".association-extension:checked")]
     .map((input) => input.value);
@@ -425,10 +645,9 @@ function savedOptionalAssociations() {
 }
 
 function renderAssociationOptions() {
-  const container = $("associationOptions");
   if (!state.runtime) return;
   const saved = new Set(savedOptionalAssociations());
-  container.innerHTML = state.runtime.optionalAssociations
+  const renderList = (extensions) => extensions
     .map((ext) => `
       <label>
         <input class="association-extension" type="checkbox"
@@ -437,6 +656,12 @@ function renderAssociationOptions() {
       </label>
     `)
     .join("");
+  $("imageAssociationOptions").innerHTML = renderList(
+    state.runtime.optionalImageAssociations || state.runtime.optionalAssociations || [],
+  );
+  $("videoAssociationOptions").innerHTML = renderList(
+    state.runtime.optionalVideoAssociations || [],
+  );
 }
 
 async function initializeRuntimeInfo() {
@@ -460,7 +685,7 @@ async function initializeRuntimeInfo() {
     $("associationHelp").textContent =
       "선택한 형식을 Windows 기본 앱 후보로 등록합니다. 보안 정책상 실제 기본 앱 지정은 이어서 열리는 Windows 설정에서 직접 확인해야 합니다.";
     const enabled = localStorage.getItem("associationsEnabled") !== "false";
-    const registrationToken = `${state.runtime.version}:capabilities-v1`;
+    const registrationToken = `${state.runtime.version}:capabilities-v2`;
     const syncedVersion = localStorage.getItem("associationRegistrationVersion");
     if (enabled && syncedVersion !== registrationToken) {
       try {
@@ -515,6 +740,7 @@ function bindActions() {
   $("rotateLeftBtn").onclick = () => rotate(-90);
   $("rotateRightBtn").onclick = () => rotate(90);
   $("flipBtn").onclick = () => {
+    if (!hasMedia()) return;
     state.flipX *= -1;
     applyTransform();
   };
@@ -564,7 +790,7 @@ function bindActions() {
       await window.clipView.registerAssociations(extensions, true);
       localStorage.setItem(
         "associationRegistrationVersion",
-        `${state.runtime.version}:capabilities-v1`,
+        `${state.runtime.version}:capabilities-v2`,
       );
       showToast("파일 연결 정보를 적용했습니다.");
     } catch (error) {
@@ -578,7 +804,7 @@ function bindActions() {
       localStorage.setItem("associationsEnabled", "false");
       localStorage.setItem(
         "associationRegistrationVersion",
-        `${state.runtime.version}:capabilities-v1`,
+        `${state.runtime.version}:capabilities-v2`,
       );
       showToast("파일 연결을 모두 제거했습니다.");
     } catch (error) {
@@ -605,13 +831,14 @@ function bindActions() {
 }
 
 stage.addEventListener("wheel", (event) => {
-  if (!state.imageDataUrl) return;
+  if (!hasMedia()) return;
   event.preventDefault();
   zoomBy(event.deltaY < 0 ? 1.12 : 1 / 1.12);
 }, { passive: false });
 
 imageLayer.addEventListener("mousedown", (event) => {
   if (event.button !== 0) return;
+  if (state.mediaType === "video" && event.target === video) return;
   state.dragging = true;
   state.dragStartX = event.clientX;
   state.dragStartY = event.clientY;
@@ -639,6 +866,9 @@ window.addEventListener("resize", () => {
 window.addEventListener("keydown", async (event) => {
   if ($("settingsDialog").open) return;
   const key = event.key.toLowerCase();
+  if (handleVideoShortcut(event, key)) {
+    return;
+  }
   if (event.ctrlKey && key === "o") {
     event.preventDefault();
     const kind = event.shiftKey ? "folder" : "file";
@@ -672,6 +902,7 @@ window.addEventListener("keydown", async (event) => {
   } else if (key === "r") {
     rotate(event.shiftKey ? -90 : 90);
   } else if (key === "f") {
+    if (!hasMedia()) return;
     state.flipX *= -1;
     applyTransform();
   } else if (key === "i") {

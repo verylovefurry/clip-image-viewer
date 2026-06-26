@@ -1,7 +1,7 @@
 {
   "name": "clip-image-viewer",
-  "version": "1.3.1",
-  "description": "Windows image viewer with CLIP STUDIO PAINT, RAW and modern image format support",
+  "version": "1.4.0",
+  "description": "Windows media viewer with CLIP STUDIO PAINT, RAW, modern image and video format support",
   "main": "src/main.js",
   "author": "verylovefurry",
   "license": "MIT",

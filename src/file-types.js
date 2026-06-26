@@ -32,6 +32,16 @@ const PSD_EXTENSIONS = new Set([".psd", ".psb"]);
 const CLIP_EXTENSIONS = new Set([".clip", ".csp"]);
 const ARCHIVE_EXTENSIONS = new Set([".zip", ".cbz"]);
 const PROJECT_EXTENSIONS = new Set([".cmc"]);
+const VIDEO_EXTENSIONS = new Set([
+  ".mp4", ".m4v", ".mov", ".qt", ".webm", ".mkv",
+  ".avi", ".wmv", ".asf", ".flv", ".f4v",
+  ".ogv", ".ogg", ".ogm",
+  ".3gp", ".3g2",
+  ".mpg", ".mpeg", ".mpe", ".m1v", ".m2v",
+  ".ts", ".mts", ".m2ts", ".vob",
+  ".divx", ".xvid", ".mxf", ".dv", ".amv",
+  ".rm", ".rmvb",
+]);
 const BASIC_ASSOCIATION_EXTENSIONS = new Set([
   ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp",
 ]);
@@ -45,11 +55,24 @@ const IMAGE_EXTENSIONS = new Set([
   ...PSD_EXTENSIONS,
   ...CLIP_EXTENSIONS,
 ]);
-const BROWSABLE_EXTENSIONS = new Set([...IMAGE_EXTENSIONS, ...ARCHIVE_EXTENSIONS]);
+const BROWSABLE_EXTENSIONS = new Set([
+  ...IMAGE_EXTENSIONS,
+  ...VIDEO_EXTENSIONS,
+  ...ARCHIVE_EXTENSIONS,
+]);
 const SUPPORTED_EXTENSIONS = new Set([...BROWSABLE_EXTENSIONS, ...PROJECT_EXTENSIONS]);
-const OPTIONAL_ASSOCIATION_EXTENSIONS = [...SUPPORTED_EXTENSIONS]
+const OPTIONAL_IMAGE_ASSOCIATION_EXTENSIONS = [
+  ...IMAGE_EXTENSIONS,
+  ...ARCHIVE_EXTENSIONS,
+  ...PROJECT_EXTENSIONS,
+]
   .filter((ext) => !BASIC_ASSOCIATION_EXTENSIONS.has(ext))
   .sort();
+const OPTIONAL_VIDEO_ASSOCIATION_EXTENSIONS = [...VIDEO_EXTENSIONS].sort();
+const OPTIONAL_ASSOCIATION_EXTENSIONS = [
+  ...OPTIONAL_IMAGE_ASSOCIATION_EXTENSIONS,
+  ...OPTIONAL_VIDEO_ASSOCIATION_EXTENSIONS,
+].sort();
 
 function extensionOf(filePath) {
   return path.extname(filePath).toLowerCase();
@@ -63,6 +86,16 @@ function isImage(filePath) {
   return IMAGE_EXTENSIONS.has(extensionOf(filePath));
 }
 
+function isVideo(filePath) {
+  return VIDEO_EXTENSIONS.has(extensionOf(filePath));
+}
+
+function mediaTypeForPath(filePath) {
+  if (isVideo(filePath)) return "video";
+  if (isImage(filePath)) return "image";
+  return "other";
+}
+
 function naturalCompare(a, b) {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 }
@@ -74,6 +107,7 @@ function listFolder(folderPath) {
       kind: ARCHIVE_EXTENSIONS.has(extensionOf(entry.name)) ? "archive" : "file",
       path: path.join(folderPath, entry.name),
       name: entry.name,
+      mediaType: mediaTypeForPath(entry.name),
     }))
     .sort((a, b) => naturalCompare(a.name, b.name));
 }
@@ -97,14 +131,19 @@ module.exports = {
   JXR_EXTENSIONS,
   MAGICK_EXTENSIONS,
   OPTIONAL_ASSOCIATION_EXTENSIONS,
+  OPTIONAL_IMAGE_ASSOCIATION_EXTENSIONS,
+  OPTIONAL_VIDEO_ASSOCIATION_EXTENSIONS,
   PROJECT_EXTENSIONS,
   PSD_EXTENSIONS,
   RAW_EXTENSIONS,
   SUPPORTED_EXTENSIONS,
+  VIDEO_EXTENSIONS,
   extensionOf,
   findComicProject,
   isImage,
+  isVideo,
   isSupported,
   listFolder,
+  mediaTypeForPath,
   naturalCompare,
 };

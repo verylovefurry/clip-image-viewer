@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+        content="default-src 'self'; img-src 'self' data: blob:; media-src 'self' file: blob: data:; style-src 'self' 'unsafe-inline'; script-src 'self'">
   <title>Clip Image Viewer</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -14,7 +14,7 @@
       <div class="brand-mark">CV</div>
       <span>Clip Image Viewer</span>
     </div>
-    <div class="file-title" id="fileTitle">이미지를 열어주세요</div>
+    <div class="file-title" id="fileTitle">미디어를 열어주세요</div>
     <div class="top-actions">
       <button id="openFileBtn" title="파일 열기 (Ctrl+O)">파일 열기</button>
       <button id="openFolderBtn" title="폴더 열기 (Ctrl+Shift+O)">폴더</button>
@@ -28,30 +28,31 @@
     <section id="stage" class="stage" tabindex="0">
       <div id="emptyState" class="empty-state">
         <div class="empty-icon">CV</div>
-        <h1>빠른 이미지 보기</h1>
-        <p>이미지, RAW, CLIP/CMC, PSD 또는 ZIP/CBZ 파일을 여기에 끌어놓으세요.</p>
+        <h1>빠른 미디어 보기</h1>
+        <p>이미지, 동영상, RAW, CLIP/CMC, PSD 또는 ZIP/CBZ 파일을 여기에 끌어놓으세요.</p>
         <div class="empty-actions">
-          <button id="emptyOpenFileBtn" class="primary">이미지 열기</button>
+          <button id="emptyOpenFileBtn" class="primary">파일 열기</button>
           <button id="emptyOpenFolderBtn">폴더 열기</button>
         </div>
-        <div class="format-note">일반 이미지 · RAW · JXR · BPG · AVIF/JXL · PSD · CLIP/CMC · ZIP/CBZ</div>
+        <div class="format-note">일반 이미지 · 동영상 · RAW · JXR · BPG · AVIF/JXL · PSD · CLIP/CMC · ZIP/CBZ</div>
       </div>
 
       <div id="loading" class="loading hidden">
         <div class="spinner"></div>
-        <span>이미지를 불러오는 중...</span>
+        <span>파일을 불러오는 중...</span>
       </div>
 
       <div id="imageLayer" class="image-layer hidden">
         <img id="viewerImage" draggable="false" alt="">
+        <video id="viewerVideo" class="hidden" controls playsinline></video>
       </div>
 
-      <button id="prevOverlay" class="nav-overlay nav-left hidden" title="이전 이미지">
+      <button id="prevOverlay" class="nav-overlay nav-left hidden" title="이전 파일">
         <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true">
           <path d="M13 4 7 10l6 6"></path>
         </svg>
       </button>
-      <button id="nextOverlay" class="nav-overlay nav-right hidden" title="다음 이미지">
+      <button id="nextOverlay" class="nav-overlay nav-right hidden" title="다음 파일">
         <svg class="nav-icon" viewBox="0 0 20 20" aria-hidden="true">
           <path d="m7 4 6 6-6 6"></path>
         </svg>
@@ -62,7 +63,7 @@
 
     <aside id="infoPanel" class="info-panel hidden">
       <div class="panel-heading">
-        <strong>이미지 정보</strong>
+        <strong>파일 정보</strong>
         <button id="closeInfoBtn" class="icon-button">닫기</button>
       </div>
       <dl id="infoList"></dl>
@@ -177,7 +178,11 @@
               <button type="button" class="small-button" id="clearOptionalAssociationBtn">선택 해제</button>
             </div>
           </div>
-          <div class="association-options" id="associationOptions"></div>
+          <strong class="association-title">이미지 확장자</strong>
+          <div class="association-options" id="imageAssociationOptions"></div>
+          <hr class="association-divider">
+          <strong class="association-title">동영상 확장자</strong>
+          <div class="association-options" id="videoAssociationOptions"></div>
           <div class="association-actions">
             <button type="button" id="clearAssociationBtn">모든 연결 제거</button>
             <button type="button" id="applyAssociationBtn">선택 항목 등록 후 기본 앱 설정 열기</button>
