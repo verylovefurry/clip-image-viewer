@@ -30,6 +30,10 @@ const state = {
   infoVisible: false,
   runtime: null,
   update: null,
+  videoControlsTimer: null,
+  videoControlsMode: "full",
+  videoControlsLockedMode: "",
+  videoPlaybackMode: localStorage.getItem("videoPlaybackMode") || "sequential",
   settings: {
     background: localStorage.getItem("background") || "dark",
     slideInterval: Number(localStorage.getItem("slideInterval") || 3000),
@@ -42,6 +46,18 @@ const stage = $("stage");
 const imageLayer = $("imageLayer");
 const image = $("viewerImage");
 const video = $("viewerVideo");
+const videoControls = $("videoControls");
+const videoSeek = $("videoSeek");
+const videoPlayBtn = $("videoPlayBtn");
+const videoTimeLabel = $("videoTimeLabel");
+const videoTitleLabel = $("videoTitleLabel");
+const videoModeBtn = $("videoModeBtn");
+const videoSubtitleBtn = $("videoSubtitleBtn");
+const videoMuteBtn = $("videoMuteBtn");
+const videoVolume = $("videoVolume");
+const videoSpeedSelect = $("videoSpeedSelect");
+const videoFullscreenBtn = $("videoFullscreenBtn");
+const videoContextMenu = $("videoContextMenu");
 const emptyState = $("emptyState");
 const loading = $("loading");
 const toast = $("toast");
@@ -52,6 +68,13 @@ const imageCache = new Map();
 function currentItem() {
   return state.items[state.index] || null;
 }
+
+const VIDEO_PLAYBACK_MODES = {
+  sequential: "순서",
+  repeatAll: "전체반복",
+  repeatOne: "한 영상 반복",
+  shuffle: "무작위",
+};
 
 function isVideoItem(item = currentItem()) {
   return item?.mediaType === "video";
@@ -68,19 +91,105 @@ function clearSubtitleTracks() {
 }
 
 function clearVideo() {
+  clearTimeout(state.videoControlsTimer);
   clearSubtitleTracks();
   video.pause();
   video.onloadedmetadata = null;
   video.onerror = null;
   video.removeAttribute("src");
+  video.removeAttribute("width");
+  video.removeAttribute("height");
   video.load();
   state.videoSrc = "";
+  videoControls.classList.add("hidden");
+  videoControls.classList.remove("controls-hidden", "peek-progress", "peek-volume");
+  state.videoControlsLockedMode = "";
+  document.body.classList.remove("video-cursor-hidden");
+  imageLayer.classList.remove("video-active");
+  hideVideoContextMenu();
+  updateVideoUi();
 }
 
 function clearImage() {
   image.removeAttribute("src");
   image.classList.add("hidden");
   state.imageDataUrl = "";
+}
+
+function hideVideoContextMenu() {
+  videoContextMenu.classList.add("hidden");
+}
+
+function setVideoControlsMode(mode) {
+  state.videoControlsMode = mode;
+  videoControls.classList.toggle("peek-progress", mode === "progress");
+  videoControls.classList.toggle("peek-volume", mode === "volume");
+}
+
+function hideVideoControls() {
+  if (state.mediaType !== "video") return;
+  videoControls.classList.add("controls-hidden");
+  state.videoControlsLockedMode = "";
+  document.body.classList.toggle("video-cursor-hidden", !video.paused);
+  hideVideoContextMenu();
+}
+
+function videoControlsVisible() {
+  return (
+    !videoControls.classList.contains("hidden") &&
+    !videoControls.classList.contains("controls-hidden")
+  );
+}
+
+function showVideoControls(mode = "full", timeout = 3000, options = {}) {
+  if (state.mediaType !== "video") return;
+  clearTimeout(state.videoControlsTimer);
+  const locked = state.videoControlsLockedMode;
+  const effectiveMode = (
+    mode === "full" &&
+    locked &&
+    videoControlsVisible() &&
+    !options.forceFull
+  ) ? locked : mode;
+  setVideoControlsMode(effectiveMode);
+  state.videoControlsLockedMode = (
+    options.lockMode ||
+    (locked && effectiveMode === locked && mode === "full" && videoControlsVisible())
+  ) ? effectiveMode : "";
+  videoControls.classList.remove("hidden", "controls-hidden");
+  document.body.classList.remove("video-cursor-hidden");
+  if (timeout > 0) {
+    state.videoControlsTimer = setTimeout(hideVideoControls, timeout);
+  }
+}
+
+function showVideoInputFeedback(mode, timeout = 1400) {
+  if (state.videoControlsLockedMode) {
+    showVideoControls(state.videoControlsLockedMode, timeout, { lockMode: true });
+  } else if (videoControlsVisible() && state.videoControlsMode === "full") {
+    showVideoControls("full", 3000);
+  } else {
+    showVideoControls(mode, timeout, { lockMode: true });
+  }
+}
+
+function showVideoContextMenu(event) {
+  if (state.mediaType !== "video") return;
+  event.preventDefault();
+  showVideoControls("full", 4000, { forceFull: true });
+  videoContextMenu.classList.remove("hidden");
+  const rect = stage.getBoundingClientRect();
+  const menuRect = videoContextMenu.getBoundingClientRect();
+  const left = Math.min(
+    Math.max(event.clientX - rect.left, 8),
+    Math.max(8, rect.width - menuRect.width - 8),
+  );
+  const top = Math.min(
+    Math.max(event.clientY - rect.top, 8),
+    Math.max(8, rect.height - menuRect.height - 8),
+  );
+  videoContextMenu.style.left = `${left}px`;
+  videoContextMenu.style.top = `${top}px`;
 }
 
 function imageKey(index, cropMode = state.cropMode) {
@@ -180,8 +289,178 @@ function attachSubtitleTracks(subtitles) {
     video.appendChild(track);
     track.addEventListener("load", () => {
       track.track.mode = index === 0 ? "showing" : "disabled";
+      updateVideoUi();
     });
   });
+}
+
+function formatVideoTime(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0:00";
+  const total = Math.floor(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  return hours
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
+    : `${minutes}:${String(secs).padStart(2, "0")}`;
+}
+
+function subtitleTrackShowing() {
+  return [...video.textTracks].some((track) => track.mode === "showing");
+}
+
+function setSubtitleTrackMode(showing) {
+  [...video.textTracks].forEach((track, index) => {
+    track.mode = showing && index === 0 ? "showing" : "disabled";
+  });
+  updateVideoUi();
+}
+
+function updateRangeProgress(input, percent) {
+  input.style.setProperty("--progress", `${Math.max(0, Math.min(100, percent))}%`);
+}
+
+function updateVideoUi() {
+  const duration = Number.isFinite(video.duration) ? video.duration : 0;
+  const current = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+  const progress = duration ? current / duration * 100 : 0;
+  videoSeek.value = String(duration ? Math.round(current / duration * 1000) : 0);
+  updateRangeProgress(videoSeek, progress);
+  videoTimeLabel.textContent = `${formatVideoTime(current)} / ${formatVideoTime(duration)}`;
+  videoTitleLabel.textContent = currentItem()?.name || "";
+  videoPlayBtn.classList.toggle("playing", !video.paused);
+  videoPlayBtn.title = video.paused
+    ? "재생 (Ctrl+Space)"
+    : "일시정지 (Ctrl+Space)";
+  if (video.paused) document.body.classList.remove("video-cursor-hidden");
+  videoVolume.value = String(video.muted ? 0 : video.volume);
+  updateRangeProgress(videoVolume, (video.muted ? 0 : video.volume) * 100);
+  videoMuteBtn.classList.toggle("active", video.muted || video.volume === 0);
+  videoSpeedSelect.value = String(video.playbackRate);
+  const hasSubtitles = video.textTracks.length > 0;
+  videoSubtitleBtn.disabled = !hasSubtitles;
+  videoSubtitleBtn.classList.toggle("active", hasSubtitles && subtitleTrackShowing());
+  videoModeBtn.textContent = VIDEO_PLAYBACK_MODES[state.videoPlaybackMode] || "순서";
+  videoContextMenu.querySelectorAll("[data-video-mode]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.videoMode === state.videoPlaybackMode);
+  });
+  videoContextMenu.querySelectorAll("[data-video-speed]").forEach((button) => {
+    button.classList.toggle("active", Number(button.dataset.videoSpeed) === video.playbackRate);
+  });
+  videoContextMenu.querySelector("[data-video-action='playPause']").textContent = (
+    video.paused ? "재생" : "일시정지"
+  );
+  videoContextMenu.querySelector("[data-video-action='mute']").classList.toggle(
+    "active",
+    video.muted || video.volume === 0,
+  );
+  videoContextMenu.querySelector("[data-video-action='subtitles']").classList.toggle(
+    "active",
+    hasSubtitles && subtitleTrackShowing(),
+  );
+  videoContextMenu.querySelector("[data-video-action='subtitles']").disabled = !hasSubtitles;
+}
+
+function setVideoPlaybackMode(mode) {
+  if (!VIDEO_PLAYBACK_MODES[mode]) return;
+  state.videoPlaybackMode = mode;
+  localStorage.setItem("videoPlaybackMode", mode);
+  updateVideoUi();
+  showVideoControls("full", 3000);
+}
+
+function cycleVideoPlaybackMode() {
+  const modes = Object.keys(VIDEO_PLAYBACK_MODES);
+  const next = modes[(modes.indexOf(state.videoPlaybackMode) + 1) % modes.length];
+  setVideoPlaybackMode(next);
+}
+
+function videoItemIndices() {
+  return state.items
+    .map((item, index) => (isVideoItem(item) ? index : -1))
+    .filter((index) => index >= 0);
+}
+
+function nextVideoIndexForMode() {
+  const indices = videoItemIndices();
+  if (!indices.length) return -1;
+  const position = indices.indexOf(state.index);
+  if (state.videoPlaybackMode === "shuffle") {
+    if (indices.length === 1) return indices[0];
+    const choices = indices.filter((index) => index !== state.index);
+    return choices[Math.floor(Math.random() * choices.length)];
+  }
+  if (state.videoPlaybackMode === "repeatAll") {
+    return indices[(position + 1 + indices.length) % indices.length];
+  }
+  const next = indices[position + 1];
+  return Number.isInteger(next) ? next : -1;
+}
+
+async function playVideoIndex(index) {
+  if (index < 0) return;
+  await selectItem(index);
+  if (state.mediaType === "video") {
+    void video.play().catch(() => {});
+    showVideoControls("full", 3000);
+  }
+}
+
+function handleVideoEnded() {
+  if (state.mediaType !== "video") return;
+  if (state.videoPlaybackMode === "repeatOne") {
+    video.currentTime = 0;
+    void video.play().catch(() => {});
+    showVideoControls("progress", 1200);
+    return;
+  }
+  const next = nextVideoIndexForMode();
+  if (next >= 0) void playVideoIndex(next);
+  else showVideoControls("full", 0);
+}
+
+function handleVideoContextAction(action) {
+  switch (action) {
+    case "playPause":
+      toggleVideoPlayback();
+      break;
+    case "restart":
+      video.currentTime = 0;
+      void video.play().catch(() => {});
+      break;
+    case "seekBack":
+      seekVideoBy(-5);
+      break;
+    case "seekForward":
+      seekVideoBy(5);
+      break;
+    case "mute":
+      video.muted = !video.muted;
+      updateVideoUi();
+      showVideoControls("volume", 1200, { lockMode: true });
+      break;
+    case "subtitles":
+      if (video.textTracks.length) setSubtitleTrackMode(!subtitleTrackShowing());
+      break;
+    case "fit":
+      fitImage();
+      break;
+    case "actual":
+      actualSize();
+      break;
+    case "fullscreen":
+      void toggleFullscreen();
+      break;
+    case "reveal":
+      if (currentItem()) void window.clipView.showInFolder(currentItem());
+      break;
+    case "openOriginal":
+      if (currentItem()) void window.clipView.openOriginal(currentItem());
+      break;
+    default:
+      return;
+  }
+  updateVideoUi();
 }
 
 function formatBytes(bytes) {
@@ -397,6 +676,7 @@ async function loadCurrentVideo(item) {
     await new Promise((resolve, reject) => {
       video.onloadedmetadata = resolve;
       video.onerror = () => reject(new Error("동영상 코덱을 재생할 수 없습니다."));
+      video.controls = false;
       video.src = media.url;
       video.load();
     });
@@ -405,6 +685,8 @@ async function loadCurrentVideo(item) {
     state.videoSrc = media.url;
     state.naturalWidth = video.videoWidth || 16;
     state.naturalHeight = video.videoHeight || 9;
+    video.setAttribute("width", String(state.naturalWidth));
+    video.setAttribute("height", String(state.naturalHeight));
     state.metadata = {
       ...media.metadata,
       width: state.naturalWidth,
@@ -415,13 +697,18 @@ async function loadCurrentVideo(item) {
     attachSubtitleTracks(subtitles);
     video.classList.remove("hidden");
     imageLayer.classList.remove("hidden");
+    imageLayer.classList.add("video-active");
     fitImage();
+    updateVideoUi();
+    showVideoControls("full", 3000);
     updateUi();
     preloadAdjacentImages();
   } catch (error) {
     state.videoSrc = "";
     state.mediaType = "";
     state.metadata = null;
+    videoControls.classList.add("hidden");
+    imageLayer.classList.remove("video-active");
     imageLayer.classList.add("hidden");
     emptyState.classList.remove("hidden");
     showToast(error?.message || "동영상을 열지 못했습니다.", true);
@@ -579,19 +866,29 @@ function transformedPngDataUrl() {
 
 function toggleVideoPlayback() {
   if (state.mediaType !== "video") return;
-  if (video.paused) void video.play();
-  else video.pause();
+  if (video.paused) {
+    void video.play().catch((error) => {
+      showToast(error?.message || "동영상을 재생하지 못했습니다.", true);
+    });
+  } else {
+    video.pause();
+  }
+  updateVideoUi();
 }
 
 function seekVideoBy(seconds) {
   if (state.mediaType !== "video" || !Number.isFinite(video.duration)) return;
   video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seconds));
+  updateVideoUi();
+  showVideoControls("progress", 1200, { lockMode: true });
 }
 
 function changeVideoVolume(delta) {
   if (state.mediaType !== "video") return;
   video.muted = false;
   video.volume = Math.max(0, Math.min(1, video.volume + delta));
+  updateVideoUi();
+  showVideoControls("volume", 1200, { lockMode: true });
 }
 
 function handleVideoShortcut(event, key) {
@@ -626,6 +923,8 @@ function handleVideoShortcut(event, key) {
   if (key === "m") {
     event.preventDefault();
     video.muted = !video.muted;
+    updateVideoUi();
+    showVideoControls("volume", 1200, { lockMode: true });
     return true;
   }
   return false;
@@ -746,6 +1045,39 @@ function bindActions() {
   };
   $("slideshowBtn").onclick = () => state.slideshowTimer ? stopSlideshow() : startSlideshow();
   $("fullscreenBtn").onclick = toggleFullscreen;
+  videoPlayBtn.onclick = toggleVideoPlayback;
+  videoMuteBtn.onclick = () => {
+    video.muted = !video.muted;
+    updateVideoUi();
+    showVideoInputFeedback("volume");
+  };
+  videoVolume.oninput = (event) => {
+    video.volume = Number(event.target.value);
+    video.muted = video.volume === 0;
+    updateVideoUi();
+    showVideoInputFeedback("volume");
+  };
+  videoSeek.oninput = (event) => {
+    if (state.mediaType !== "video" || !Number.isFinite(video.duration)) return;
+    video.currentTime = Number(event.target.value) / 1000 * video.duration;
+    updateVideoUi();
+    showVideoInputFeedback("progress");
+  };
+  videoSpeedSelect.onchange = (event) => {
+    video.playbackRate = Number(event.target.value) || 1;
+    updateVideoUi();
+    showVideoControls("full", 3000);
+  };
+  videoModeBtn.onclick = cycleVideoPlaybackMode;
+  videoSubtitleBtn.onclick = () => {
+    if (!video.textTracks.length) return;
+    setSubtitleTrackMode(!subtitleTrackShowing());
+    showVideoControls("full", 3000);
+  };
+  videoFullscreenBtn.onclick = toggleFullscreen;
+  video.onclick = (event) => {
+    if (event.detail === 1) toggleVideoPlayback();
+  };
   $("infoBtn").onclick = () => toggleInfo();
   $("closeInfoBtn").onclick = () => toggleInfo(false);
   $("thumbBtn").onclick = () => toggleThumbnails();
@@ -828,16 +1160,55 @@ function bindActions() {
     applyUpdateState(await window.clipView.checkForUpdates());
   };
   $("restartUpdateBtn").onclick = () => window.clipView.restartAndUpdate();
+  videoControls.addEventListener("mousedown", (event) => event.stopPropagation());
+  videoControls.addEventListener("dblclick", (event) => event.stopPropagation());
+  videoControls.addEventListener("mousemove", () => showVideoControls("full", 3000));
+  videoContextMenu.querySelectorAll("[data-video-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setVideoPlaybackMode(button.dataset.videoMode);
+      hideVideoContextMenu();
+    });
+  });
+  videoContextMenu.querySelectorAll("[data-video-speed]").forEach((button) => {
+    button.addEventListener("click", () => {
+      video.playbackRate = Number(button.dataset.videoSpeed) || 1;
+      updateVideoUi();
+      hideVideoContextMenu();
+      showVideoControls("full", 3000, { forceFull: true });
+    });
+  });
+  videoContextMenu.querySelectorAll("[data-video-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.disabled) return;
+      handleVideoContextAction(button.dataset.videoAction);
+      hideVideoContextMenu();
+    });
+  });
+  ["play", "pause", "timeupdate", "durationchange", "volumechange", "ratechange", "loadedmetadata"]
+    .forEach((eventName) => video.addEventListener(eventName, updateVideoUi));
+  video.addEventListener("ended", handleVideoEnded);
 }
 
 stage.addEventListener("wheel", (event) => {
   if (!hasMedia()) return;
+  if (event.target.closest(".video-controls")) return;
   event.preventDefault();
   zoomBy(event.deltaY < 0 ? 1.12 : 1 / 1.12);
 }, { passive: false });
 
+stage.addEventListener("mousemove", () => {
+  if (state.mediaType === "video") showVideoControls("full", 3000);
+});
+
+stage.addEventListener("contextmenu", (event) => {
+  if (state.mediaType === "video") {
+    showVideoContextMenu(event);
+  }
+});
+
 imageLayer.addEventListener("mousedown", (event) => {
   if (event.button !== 0) return;
+  if (event.target.closest(".video-controls")) return;
   if (state.mediaType === "video" && event.target === video) return;
   state.dragging = true;
   state.dragStartX = event.clientX;
@@ -857,6 +1228,10 @@ window.addEventListener("mousemove", (event) => {
 window.addEventListener("mouseup", () => {
   state.dragging = false;
   imageLayer.classList.remove("dragging");
+});
+
+window.addEventListener("click", (event) => {
+  if (!event.target.closest(".video-context-menu")) hideVideoContextMenu();
 });
 
 window.addEventListener("resize", () => {
@@ -914,13 +1289,17 @@ window.addEventListener("keydown", async (event) => {
   } else if (key === "enter" || key === "f11") {
     event.preventDefault();
     toggleFullscreen();
-  } else if (key === "escape" && state.fullscreen) {
-    toggleFullscreen();
+  } else if (key === "escape") {
+    if (!videoContextMenu.classList.contains("hidden")) {
+      hideVideoContextMenu();
+    } else if (state.fullscreen) {
+      toggleFullscreen();
+    }
   }
 });
 
 stage.addEventListener("dblclick", (event) => {
-  if (event.target.closest("button")) return;
+  if (event.target.closest("button, input, select, .video-controls")) return;
   void toggleFullscreen();
 });
 

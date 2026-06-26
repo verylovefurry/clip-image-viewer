@@ -44,7 +44,47 @@
 
       <div id="imageLayer" class="image-layer hidden">
         <img id="viewerImage" draggable="false" alt="">
-        <video id="viewerVideo" class="hidden" controls playsinline></video>
+        <video id="viewerVideo" class="hidden" playsinline></video>
+        <div id="videoControls" class="video-controls hidden">
+          <input id="videoSeek" class="video-seek" type="range" min="0" max="1000" value="0" step="1"
+                 aria-label="재생 위치">
+          <div class="video-control-row">
+            <button id="videoPlayBtn" class="video-main-button" title="재생/일시정지 (Ctrl+Space)" type="button">
+              <svg class="video-icon icon-play" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M8 5v14l11-7z"></path>
+              </svg>
+              <svg class="video-icon icon-pause" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M7 5h4v14H7zM13 5h4v14h-4z"></path>
+              </svg>
+            </button>
+            <span id="videoTimeLabel" class="video-time">0:00 / 0:00</span>
+            <span id="videoTitleLabel" class="video-now-playing"></span>
+            <button id="videoModeBtn" class="video-pill video-mode" title="재생 방식" type="button">순서</button>
+            <button id="videoSubtitleBtn" class="video-pill" title="자막 켜기/끄기" type="button">CC</button>
+            <button id="videoMuteBtn" class="video-icon-button" title="음소거 (Ctrl+M)" type="button">
+              <svg class="video-icon icon-volume" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 9v6h4l5 4V5L8 9H4z"></path>
+                <path d="M16 8.5a5 5 0 0 1 0 7"></path>
+                <path class="mute-slash" d="M19 5 5 19"></path>
+              </svg>
+            </button>
+            <input id="videoVolume" class="video-volume" type="range" min="0" max="1" step="0.01" value="1"
+                   aria-label="음량">
+            <select id="videoSpeedSelect" class="video-speed" title="재생 속도">
+              <option value="0.5">0.5x</option>
+              <option value="0.75">0.75x</option>
+              <option value="1" selected>1x</option>
+              <option value="1.25">1.25x</option>
+              <option value="1.5">1.5x</option>
+              <option value="2">2x</option>
+            </select>
+            <button id="videoFullscreenBtn" class="video-icon-button" title="전체 화면" type="button">
+              <svg class="video-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 10V5h5M14 5h5v5M19 14v5h-5M10 19H5v-5"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
       </div>
 
       <button id="prevOverlay" class="nav-overlay nav-left hidden" title="이전 파일">
@@ -59,6 +99,34 @@
       </button>
       <div id="dropHint" class="drop-hint hidden">여기에 놓아 열기</div>
       <div id="toast" class="toast hidden"></div>
+      <div id="videoContextMenu" class="video-context-menu hidden">
+        <button type="button" data-video-action="playPause">재생</button>
+        <button type="button" data-video-action="restart">처음부터 재생</button>
+        <button type="button" data-video-action="seekBack">5초 뒤로</button>
+        <button type="button" data-video-action="seekForward">5초 앞으로</button>
+        <hr>
+        <strong>재생 방식</strong>
+        <button type="button" data-video-mode="sequential">순서 재생</button>
+        <button type="button" data-video-mode="repeatAll">모두 반복</button>
+        <button type="button" data-video-mode="repeatOne">현재 영상만 반복</button>
+        <button type="button" data-video-mode="shuffle">무작위 재생</button>
+        <hr>
+        <strong>재생 속도</strong>
+        <button type="button" data-video-speed="0.5">0.5x</button>
+        <button type="button" data-video-speed="1">1x</button>
+        <button type="button" data-video-speed="1.25">1.25x</button>
+        <button type="button" data-video-speed="1.5">1.5x</button>
+        <button type="button" data-video-speed="2">2x</button>
+        <hr>
+        <button type="button" data-video-action="mute">음소거</button>
+        <button type="button" data-video-action="subtitles">자막 켜기/끄기</button>
+        <button type="button" data-video-action="fit">화면에 맞춤</button>
+        <button type="button" data-video-action="actual">100% 크기</button>
+        <button type="button" data-video-action="fullscreen">전체 화면</button>
+        <hr>
+        <button type="button" data-video-action="reveal">탐색기에서 보기</button>
+        <button type="button" data-video-action="openOriginal">기본 앱으로 열기</button>
+      </div>
     </section>
 
     <aside id="infoPanel" class="info-panel hidden">
